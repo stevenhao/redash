@@ -303,7 +303,7 @@ class QueryResult {
         filter.values.push(row[filter.name]);
         if (filter.values.length === 1) {
           if (filter.multiple) {
-            filter.current = [row[filter.name]];
+            filter.current = filter.values;
           } else {
             filter.current = row[filter.name];
           }
