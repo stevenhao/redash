@@ -1,6 +1,40 @@
-import { isNil, isObject, each, forOwn, sortBy, values } from "lodash";
+import { isNil, isObject, each, forOwn, sortBy, values, groupBy } from "lodash";
 
-function addPointToSeries(point: any, seriesCollection: any, seriesName: any) {
+interface Series {
+  name: string;
+  type: "column";
+  data: { $raw: any; x: string | number; y: string | number }[];
+}
+type SeriesCollection = Partial<Record<string, Series>>;
+type AggregationFunction = (yvals: (number | string)[]) => number | string;
+type AggregationFunctionName = "FIRST" | "MEAN" | "COUNT" | "SUM";
+const DefaultAggregationFunctionName = "FIRST";
+
+const safeSum = (yvals: (number | string)[]): number | string => {
+  let result: number | string = 0;
+  for (const val of yvals) {
+    if (typeof result === "number") {
+      if (typeof val === "number") {
+        result += val;
+      } else if (result === 0) {
+        result = val;
+      }
+    }
+  }
+  return result;
+};
+const safeDiv = (val: number | string, denom: number) => {
+  if (typeof val === "number") return val / denom;
+  return val;
+};
+const AGGREGATION_FUNCTIONS: Partial<Record<AggregationFunctionName, AggregationFunction>> = {
+  FIRST: yvals => yvals[0],
+  MEAN: yvals => safeDiv(safeSum(yvals), yvals.length),
+  COUNT: yvals => yvals.length,
+  SUM: yvals => safeSum(yvals),
+};
+
+function addPointToSeries(point: any, seriesCollection: SeriesCollection, seriesName: string) {
   if (seriesCollection[seriesName] === undefined) {
     seriesCollection[seriesName] = {
       name: seriesName,
@@ -9,14 +43,18 @@ function addPointToSeries(point: any, seriesCollection: any, seriesName: any) {
     };
   }
 
-  seriesCollection[seriesName].data.push(point);
+  seriesCollection[seriesName]!.data.push(point);
 }
 
 export default function getChartData(data: any, options: any) {
-  const series = {};
+  const _window: any = window;
+  _window.getChartData = getChartData;
+
+  _window.data = data;
+  _window.options = options;
+  const series: SeriesCollection = {};
 
   const mappings = options.columnMapping;
-
   each(data, row => {
     let point = { $raw: row };
     let seriesName = null;
@@ -98,10 +136,23 @@ export default function getChartData(data: any, options: any) {
       addPointToSeries(point, series, seriesName);
     }
   });
-  return sortBy(values(series), ({ name }) => {
-    if (isObject(options.seriesOptions[name])) {
-      return options.seriesOptions[name].zIndex || 0;
+
+  const aggregationFunction: AggregationFunction =
+    AGGREGATION_FUNCTIONS[options.yAgg as AggregationFunctionName] ??
+    AGGREGATION_FUNCTIONS[DefaultAggregationFunctionName]!;
+  return sortBy(
+    values(series).map(series => {
+      const data = values(groupBy(series!.data, point => point.x)).map(points => ({
+        ...points[0],
+        y: aggregationFunction(points.map(p => p.y)),
+      }));
+      return { ...series, data };
+    }),
+    ({ name }) => {
+      if (isObject(options.seriesOptions[name])) {
+        return options.seriesOptions[name].zIndex || 0;
+      }
+      return 0;
     }
-    return 0;
-  });
+  );
 }

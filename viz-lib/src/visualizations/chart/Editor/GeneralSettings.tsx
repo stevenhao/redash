@@ -164,6 +164,34 @@ export default function GeneralSettings({ options, data, onOptionsChange }: any)
         />
       ))}
 
+      {!includes(["custom", "heatmap", "bubble", "scatter"], options.globalSeriesType) && (
+        // @ts-expect-error ts-migrate(2745) FIXME: This JSX tag's 'children' prop expects type 'never... Remove this comment to see the full error message
+        <Section>
+          <Select
+            label="Aggregation of points with same x"
+            defaultValue={"FIRST"}
+            onChange={(value: any) => onOptionsChange({ yAgg: value })}>
+            {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            <Select.Option value={"FIRST"}>Take the first point's y value</Select.Option>
+            {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            <Select.Option value={"SUM"}>
+              Take the sum of y values
+              {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            </Select.Option>
+            {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            <Select.Option value={"MEAN"}>
+              Take the mean of y values
+              {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            </Select.Option>
+            {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            <Select.Option value={"COUNT"}>
+              Take the count of y values
+              {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
+            </Select.Option>
+          </Select>
+        </Section>
+      )}
+
       {includes(["bubble"], options.globalSeriesType) && (
         <React.Fragment>
           {/* @ts-expect-error ts-migrate(2745) FIXME: This JSX tag's 'children' prop expects type 'never... Remove this comment to see the full error message */}
