@@ -1,4 +1,5 @@
-import { isNil, isObject, each, forOwn, sortBy, values, groupBy } from "lodash";
+import { sort } from "d3";
+import { isNil, isObject, each, forOwn, sortBy, values, groupBy, min, max } from "lodash";
 
 interface Series {
   name: string;
@@ -7,8 +8,20 @@ interface Series {
 }
 type SeriesCollection = Partial<Record<string, Series>>;
 type AggregationFunction = (yvals: (number | string)[]) => number | string;
-type AggregationFunctionName = "FIRST" | "MEAN" | "COUNT" | "SUM";
-const DefaultAggregationFunctionName = "FIRST";
+export enum AggregationFunctionName {
+  FIRST = "FIRST",
+  SUM = "SUM",
+  MEAN = "MEAN",
+  MEDIAN = "MEDIAN",
+  MAX = "MAX",
+  MIN = "MIN",
+  COUNT = "COUNT",
+  P25 = "P25",
+  P75 = "P75",
+  P05 = "P05",
+  P95 = "P95",
+}
+export const DefaultAggregationFunctionName = AggregationFunctionName.FIRST;
 
 const safeSum = (yvals: (number | string)[]): number | string => {
   let result: number | string = 0;
@@ -27,11 +40,22 @@ const safeDiv = (val: number | string, denom: number) => {
   if (typeof val === "number") return val / denom;
   return val;
 };
-const AGGREGATION_FUNCTIONS: Partial<Record<AggregationFunctionName, AggregationFunction>> = {
+const percentile = (vals: (number | string)[], percentile: number): number | string => {
+  vals = sortBy([...vals]);
+  return vals[Math.floor(vals.length * percentile)];
+};
+const AGGREGATION_FUNCTIONS: Record<AggregationFunctionName, AggregationFunction> = {
   FIRST: yvals => yvals[0],
   MEAN: yvals => safeDiv(safeSum(yvals), yvals.length),
   COUNT: yvals => yvals.length,
+  MEDIAN: yvals => percentile(yvals, 0.5),
   SUM: yvals => safeSum(yvals),
+  MIN: yvals => min(yvals)!,
+  MAX: yvals => max(yvals)!,
+  P25: yvals => percentile(yvals, 0.25),
+  P75: yvals => percentile(yvals, 0.75),
+  P05: yvals => percentile(yvals, 0.05),
+  P95: yvals => percentile(yvals, 0.95),
 };
 
 function addPointToSeries(point: any, seriesCollection: SeriesCollection, seriesName: string) {
