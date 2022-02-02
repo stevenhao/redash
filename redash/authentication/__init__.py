@@ -216,7 +216,7 @@ def log_user_logged_in(app, user):
 
 @login_manager.unauthorized_handler
 def redirect_to_login():
-    if request.is_xhr or "/api/" in request.path:
+    if "/api/" in request.path:
         response = jsonify(
             {"message": "Couldn't find resource. Please login and try again."}
         )
@@ -262,7 +262,12 @@ def init_app(app):
     from redash.security import csrf
 
     # Authlib's flask oauth client requires a Flask app to initialize
-    for blueprint in [create_google_oauth_blueprint(app), saml_auth.blueprint, remote_user_auth.blueprint, ldap_auth.blueprint, ]:
+    for blueprint in [
+        create_google_oauth_blueprint(app),
+        saml_auth.blueprint,
+        remote_user_auth.blueprint,
+        ldap_auth.blueprint,
+    ]:
         csrf.exempt(blueprint)
         app.register_blueprint(blueprint)
 

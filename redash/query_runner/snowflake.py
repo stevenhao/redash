@@ -1,5 +1,6 @@
 try:
     import snowflake.connector
+
     enabled = True
 except ImportError:
     enabled = False
@@ -46,7 +47,15 @@ class Snowflake(BaseQueryRunner):
                 "database": {"type": "string"},
                 "host": {"type": "string"},
             },
-            "order": ["account", "region", "user", "password", "warehouse", "database", "host"],
+            "order": [
+                "account",
+                "region",
+                "user",
+                "password",
+                "warehouse",
+                "database",
+                "host",
+            ],
             "required": ["user", "password", "account", "database", "warehouse"],
             "secret": ["password"],
             "extra_options": [
@@ -70,7 +79,7 @@ class Snowflake(BaseQueryRunner):
         account = self.configuration["account"]
 
         # for us-west we don't need to pass a region (and if we do, it fails to connect)
-        if region == "us-west":
+        if region is not None and "us-west" in region:
             region = None
 
         if self.configuration.__contains__("host"):
@@ -81,13 +90,12 @@ class Snowflake(BaseQueryRunner):
             else:
                 host = "{}.snowflakecomputing.com".format(account)
 
-
         connection = snowflake.connector.connect(
-            user = self.configuration["user"],
-            password = self.configuration["password"],
-            account = account,
-            region = region,
-            host = host
+            user=self.configuration["user"],
+            password=self.configuration["password"],
+            account=account,
+            region=region,
+            host=host,
         )
 
         return connection
@@ -102,6 +110,14 @@ class Snowflake(BaseQueryRunner):
 
         data = {"columns": columns, "rows": rows}
         return data
+
+    def annotate_query(self, query, metadata):
+        if not self.should_annotate_query:
+            return query
+
+        annotation = ", ".join(["{}: {}".format(k, v) for k, v in metadata.items()])
+        annotated_query = "{}\n\n--{}".format(query, annotation)
+        return annotated_query
 
     def run_query(self, query, user):
         connection = self._get_connection()
@@ -137,10 +153,10 @@ class Snowflake(BaseQueryRunner):
             cursor.close()
             connection.close()
 
-        return data, error    
-    
+        return data, error
+
     def _database_name_includes_schema(self):
-        return '.' in self.configuration.get('database')
+        return "." in self.configuration.get("database")
 
     def get_schema(self, get_stats=False):
         if self._database_name_includes_schema():

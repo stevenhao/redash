@@ -4,6 +4,7 @@ import logging
 import time
 import numbers
 import pytz
+import json
 
 from sqlalchemy import distinct, or_, and_, UniqueConstraint, cast
 from sqlalchemy.dialects import postgresql
@@ -16,6 +17,8 @@ from sqlalchemy_utils import generic_relationship
 from sqlalchemy_utils.types import TSVectorType
 from sqlalchemy_utils.models import generic_repr
 from sqlalchemy_utils.types.encrypted.encrypted_type import FernetEngine
+
+from tabulate import tabulate
 
 from redash import redis_connection, utils, settings
 from redash.destinations import (
@@ -30,7 +33,8 @@ from redash.query_runner import (
     TYPE_BOOLEAN,
     TYPE_DATE,
     TYPE_DATETIME,
-    BaseQueryRunner)
+    BaseQueryRunner,
+)
 from redash.utils import (
     generate_token,
     json_dumps,
@@ -38,7 +42,8 @@ from redash.utils import (
     mustache_render,
     base_url,
     sentry,
-    gen_query_hash)
+    gen_query_hash,
+)
 from redash.utils.configuration import ConfigurationContainer
 from redash.models.parameterized_query import ParameterizedQuery
 
@@ -52,7 +57,7 @@ from .types import (
     MutableDict,
     MutableList,
     PseudoJSON,
-    pseudo_json_cast_property
+    pseudo_json_cast_property,
 )
 from .users import AccessPermission, AnonymousUser, ApiUser, Group, User  # noqa
 
@@ -122,7 +127,7 @@ class DataSource(BelongsToOrgMixin, db.Model):
             "syntax": self.query_runner.syntax,
             "paused": self.paused,
             "pause_reason": self.pause_reason,
-            "supports_auto_limit": self.query_runner.supports_auto_limit
+            "supports_auto_limit": self.query_runner.supports_auto_limit,
         }
 
         if all:
@@ -211,7 +216,12 @@ class DataSource(BelongsToOrgMixin, db.Model):
 
     def _sort_schema(self, schema):
         return [
-            {"name": i["name"], "columns": sorted(i["columns"], key=lambda x: x["name"] if isinstance(x, dict) else x)}
+            {
+                "name": i["name"],
+                "columns": sorted(
+                    i["columns"], key=lambda x: x["name"] if isinstance(x, dict) else x
+                ),
+            }
             for i in sorted(schema, key=lambda x: x["name"])
         ]
 
@@ -470,7 +480,9 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
     version = Column(db.Integer, default=1)
     org_id = Column(key_type("Organization"), db.ForeignKey("organizations.id"))
     org = db.relationship(Organization, backref="queries")
-    data_source_id = Column(key_type("DataSource"), db.ForeignKey("data_sources.id"), nullable=True)
+    data_source_id = Column(
+        key_type("DataSource"), db.ForeignKey("data_sources.id"), nullable=True
+    )
     data_source = db.relationship(DataSource, backref="queries")
     latest_query_data_id = Column(
         key_type("QueryResult"), db.ForeignKey("query_results.id"), nullable=True
@@ -483,7 +495,9 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
     api_key = Column(db.String(40), default=lambda: generate_token(40))
     user_id = Column(key_type("User"), db.ForeignKey("users.id"))
     user = db.relationship(User, foreign_keys=[user_id])
-    last_modified_by_id = Column(key_type("User"), db.ForeignKey("users.id"), nullable=True)
+    last_modified_by_id = Column(
+        key_type("User"), db.ForeignKey("users.id"), nullable=True
+    )
     last_modified_by = db.relationship(
         User, backref="modified_queries", foreign_keys=[last_modified_by_id]
     )
@@ -866,9 +880,15 @@ class Query(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model):
         return [api_key[0] for api_key in api_keys]
 
     def update_query_hash(self):
-        should_apply_auto_limit = self.options.get("apply_auto_limit", False) if self.options else False
-        query_runner = self.data_source.query_runner if self.data_source else BaseQueryRunner({})
-        self.query_hash = query_runner.gen_query_hash(self.query_text, should_apply_auto_limit)
+        should_apply_auto_limit = (
+            self.options.get("apply_auto_limit", False) if self.options else False
+        )
+        query_runner = (
+            self.data_source.query_runner if self.data_source else BaseQueryRunner({})
+        )
+        self.query_hash = query_runner.gen_query_hash(
+            self.query_text, should_apply_auto_limit
+        )
 
 
 @listens_for(Query, "before_insert")
@@ -1033,6 +1053,34 @@ class Alert(TimestampMixin, BelongsToOrgMixin, db.Model):
         else:
             result_value = None
 
+        result_columns = {}
+        first_row = None
+        if data["rows"]:
+            first_row = data["rows"][0]
+            result_columns = {
+                f"RESULT_{col}": value for col, value in first_row.items()
+            }
+
+        def tabulate_fn(text):
+            if first_row is None:
+                return "ERROR: No Data."
+            col_names = [t.strip() for t in text.split("|") if t.strip()]
+
+            # Validate columns
+            cols = {}
+            for col_name in col_names:
+                if col_name not in first_row:
+                    return f"ERROR: Column {col_name} not in result."
+                try:
+                    parsed = json.loads(first_row[col_name])
+                    if not isinstance(parsed, list):
+                        raise Exception(f"Column {col_name} is not an array.")
+                    cols[col_name] = parsed
+                except Exception:
+                    return f"ERROR: Column {col_name} is not a valid json array."
+            formatted = tabulate(cols, headers=col_names, tablefmt="psql")
+            return f"```{formatted}```"
+
         context = {
             "ALERT_NAME": self.name,
             "ALERT_URL": "{host}/alerts/{alert_id}".format(host=host, alert_id=self.id),
@@ -1046,6 +1094,8 @@ class Alert(TimestampMixin, BelongsToOrgMixin, db.Model):
             "QUERY_RESULT_VALUE": result_value,
             "QUERY_RESULT_ROWS": data["rows"],
             "QUERY_RESULT_COLS": data["columns"],
+            **result_columns,
+            "tabulate": tabulate_fn,
         }
         return mustache_render(template, context)
 
@@ -1120,7 +1170,8 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
                 joinedload(Dashboard.user).load_only(
                     "id", "name", "_profile_image_url", "email"
                 )
-            ).distinct(Dashboard.created_at, Dashboard.slug)
+            )
+            .distinct(Dashboard.created_at, Dashboard.slug)
             .outerjoin(Widget)
             .outerjoin(Visualization)
             .outerjoin(Query)
@@ -1152,7 +1203,9 @@ class Dashboard(ChangeTrackingMixin, TimestampMixin, BelongsToOrgMixin, db.Model
 
     @classmethod
     def search_by_user(cls, term, user, limit=None):
-        return cls.by_user(user).filter(cls.name.ilike("%{}%".format(term))).limit(limit)
+        return (
+            cls.by_user(user).filter(cls.name.ilike("%{}%".format(term))).limit(limit)
+        )
 
     @classmethod
     def all_tags(cls, org, user):
@@ -1243,7 +1296,9 @@ class Widget(TimestampMixin, BelongsToOrgMixin, db.Model):
     text = Column(db.Text, nullable=True)
     width = Column(db.Integer)
     options = Column(db.Text)
-    dashboard_id = Column(key_type("Dashboard"), db.ForeignKey("dashboards.id"), index=True)
+    dashboard_id = Column(
+        key_type("Dashboard"), db.ForeignKey("dashboards.id"), index=True
+    )
 
     __tablename__ = "widgets"
 
@@ -1422,7 +1477,9 @@ class AlertSubscription(TimestampMixin, db.Model):
     user_id = Column(key_type("User"), db.ForeignKey("users.id"))
     user = db.relationship(User)
     destination_id = Column(
-        key_type("NotificationDestination"), db.ForeignKey("notification_destinations.id"), nullable=True
+        key_type("NotificationDestination"),
+        db.ForeignKey("notification_destinations.id"),
+        nullable=True,
     )
     destination = db.relationship(NotificationDestination)
     alert_id = Column(key_type("Alert"), db.ForeignKey("alerts.id"))
