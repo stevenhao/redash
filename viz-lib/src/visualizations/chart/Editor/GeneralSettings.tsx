@@ -176,6 +176,7 @@ export default function GeneralSettings({ options, data, onOptionsChange }: any)
               // @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message
               <Select.Option key={val} value={val}>
                 {val}
+                {/* @ts-expect-error ts-migrate(2339) FIXME: Property 'Option' does not exist on type '({ class... Remove this comment to see the full error message */}
               </Select.Option>
             ))}
           </Select>
