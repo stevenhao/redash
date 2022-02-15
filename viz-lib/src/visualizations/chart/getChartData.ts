@@ -166,7 +166,9 @@ export default function getChartData(data: any, options: any) {
 
   return sortBy(
     values(series).map(series => {
-      if (!options.yAgg) return series;
+      if (_.includes(["custom", "heatmap", "bubble", "scatter", "box"], options.globalSeriesType)) {
+        return series;
+      }
       const aggregationFunction: AggregationFunction =
         AGGREGATION_FUNCTIONS[options.yAgg as AggregationFunctionName] ??
         AGGREGATION_FUNCTIONS[DefaultAggregationFunctionName]!;
